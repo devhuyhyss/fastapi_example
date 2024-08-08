@@ -3,7 +3,7 @@ from pydantic import BaseModel, ValidationError, Field
 from datetime import datetime
 from database import SessionLocal
 from sqlalchemy.orm import Session
-from models import Product, Category
+from models import Product, Category, Customer, Order
 from utils.common import paginate_query
 from unidecode import unidecode
 from typing import Optional
@@ -16,23 +16,20 @@ class ProductItem(BaseModel):
   category_id: str
   amount: int
   price: int
+  
 class ProductFilter(BaseModel):
   name: Optional[str] = Field(None, description="Product name")
   amount: Optional[int] = Field(None, ge=0, description="Product amount")
   price: Optional[int] = Field(None, ge=0, description="Product price") 
 
-class CustomerItem(BaseModel):
-  name: str
-  phone: str
-  age: int
-  
-# class OrderItem(BaseModel):
-#   customer_id: str
-#   products: list
-
 class CategoryItem(BaseModel):
   name: str
   desc: str
+
+class CustomerItem(BaseModel):
+  name: str
+  age: int
+  phone: str
 
 def getDB():
   db = SessionLocal()
@@ -103,16 +100,19 @@ async def deleteProduct(id: str, db: Session = Depends(getDB)):
   return {"message": "Product deleted success!"}
 
 
-
 # Category router
 @app.get("/categories")
 async def getAllCategories(
-  request: Request,
-  page: int = Query(default= 1), limit: int = Query(default = 2), db: Session = Depends(getDB)):
-  query_params = dict(request.query_params)
+  page: int = Query(default = 1),
+  limit: int = Query(default = 1),
+  name: str | None = None,
+  db: Session = Depends(getDB)):
 
-  query = db.query(Category)
+  filterQuery = []
+  if name:
+    filterQuery.append(Category.name.like(f"%{unidecode(name.lower())}%"))
   
+  query = db.query(Category).filter(and_(*filterQuery))
   categories = paginate_query(query, page, limit).all()
   return categories
 
@@ -154,31 +154,60 @@ async def deleteCategory(id: str, db: Session = Depends(getDB)):
 
 
 
-# Order router
-# @app.get("/orders")
-# async def getAllOrders(page: int = Query(default= 1), limit: int = Query(default=1), db: Session = Depends(getDB)):
-#   query = db.query(Order)
-#   orders = paginate_query(query, page, limit).all()
-#   return orders
+# Customer router
+@app.get("/customers")
+async def getAllCustomers(
+  page: int = Query(default = 1),
+  limit: int = Query(default = 1),
+  name: str | None = None,
+  age: int | None = None,
+  phone: str | None = None,
+  db: Session = Depends(getDB)):
 
-# @app.post('/order')
-# async def createOrder(order: OrderItem, db: Session = Depends(getDB)):
-#   order = Order(
-#     customer_id = order.customer_id,
-#     products = order.products,
-#     created_at = datetime.now(),
-#     updated_at = datetime.now(),
-#   )
-#   db.add(order)
-#   db.commit()
-#   db.refresh(order)
-#   return order
+  filterQuery = []
+  if name:
+    filterQuery.append(Customer.name.like(f"%{unidecode(name.lower())}%"))
+  if age:
+    filterQuery.append(Customer.age == age)
+  if phone:
+    filterQuery.append(Customer.phone.like(f"%{phone.lower()}%"))
+  
+  query = db.query(Customer).filter(and_(*filterQuery))
+  customers = paginate_query(query, page, limit).all()
+  return customers
 
-# @app.delete('/order/{id}')
-# async def deleteOrder(id: str, db: Session = Depends(getDB)):
-#   order = db.query(Order).filter(Order.id == id).first()
-#   if order is None:
-#     raise HTTPException(status_code=404, detail="Order not found!")
-#   db.delete(order)
-#   db.commit()
-#   return {"message": "Order deleted success!"}
+@app.post('/customer')
+async def createCustomer(category: CustomerItem, db: Session = Depends(getDB)):
+  category = Category(
+    name = category.name.strip(),
+    desc = category.desc.strip(),
+    created_at = datetime.now(),
+    updated_at = datetime.now(),
+  )
+  db.add(category)
+  db.commit()
+  db.refresh(category)
+  return category
+
+@app.patch('/customer/{id}')
+async def updateCustomer(category_update: CategoryItem, id: str, db: Session = Depends(getDB)):
+  category = db.query(Category).filter(Category.id == id).first()
+  if not category:
+    raise HTTPException(status_code=404, detail="Category not found")
+  
+  for key, value in category_update.dict(exclude_unset=True).items():
+    setattr(category, key, value)
+  category.updated_at = datetime.now()
+
+  db.commit()
+  db.refresh(category)
+  return category
+
+@app.delete('/customer/{id}')
+async def deleteCustomer(id: str, db: Session = Depends(getDB)):
+  category = db.query(Category).filter(Category.id == id).first()
+  if category is None:
+    raise HTTPException(status_code=404, detail="Category not found!")
+  db.delete(category)
+  db.commit()
+  return {"message": "Category deleted success!"}
